@@ -82,18 +82,18 @@ async def send_daily_digest(bot: Bot) -> None:
 
 
 def setup_scheduler(bot: Bot) -> AsyncIOScheduler:
-    """Initialize and schedule periodic tasks."""
-    scheduler = AsyncIOScheduler()
+    """Initialize and schedule periodic tasks with Indian Standard Time (Asia/Kolkata)."""
+    scheduler = AsyncIOScheduler(timezone="Asia/Kolkata")
 
     # Parse digest time (HH:MM)
     time_parts = settings.DIGEST_TIME.split(":")
     hour = int(time_parts[0]) if len(time_parts) > 0 else 9
     minute = int(time_parts[1]) if len(time_parts) > 1 else 0
 
-    # Schedule Daily Digest
+    # Schedule Daily Digest at 09:00 AM IST
     scheduler.add_job(
         send_daily_digest,
-        trigger=CronTrigger(hour=hour, minute=minute),
+        trigger=CronTrigger(hour=hour, minute=minute, timezone="Asia/Kolkata"),
         args=[bot],
         id="daily_digest_job",
         replace_existing=True,
