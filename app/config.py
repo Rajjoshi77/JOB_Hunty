@@ -10,7 +10,10 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 class Settings(BaseSettings):
     """Application configuration loaded from environment variables or .env file."""
 
-    BOT_TOKEN: str = Field(default="", description="Telegram Bot Token from @BotFather")
+    BOT_TOKEN: str = Field(
+        default=os.environ.get("BOT_TOKEN", "8943083272:AAHr8eRczMwlh9AkDGQc7Vbzb6zJbsgSeRU"),
+        description="Telegram Bot Token from @BotFather"
+    )
     DATABASE_URL: str = Field(
         default=f"sqlite+aiosqlite:///{BASE_DIR / 'jobhunter.db'}",
         description="Async database connection string",

@@ -72,14 +72,13 @@ async def main() -> None:
     asyncio.create_task(background_initial_scraping())
 
     # 4. Check for bot token
-    if not settings.BOT_TOKEN or settings.BOT_TOKEN == "your_telegram_bot_token_here":
-        logger.warning(
-            "⚠️ No valid BOT_TOKEN provided! Set BOT_TOKEN in environment variables."
-        )
+    token = settings.BOT_TOKEN
+    if not token or len(token) < 15:
+        token = "8943083272:AAHr8eRczMwlh9AkDGQc7Vbzb6zJbsgSeRU"
 
     # 5. Initialize Telegram Bot & Dispatcher
     bot = Bot(
-        token=settings.BOT_TOKEN or "123456789:MockTokenForValidationPurposesOnly000",
+        token=token,
         default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN),
     )
     dp = Dispatcher()
@@ -94,30 +93,31 @@ async def main() -> None:
     )
 
     # 7. Start Telegram Bot resilient polling
-    if settings.BOT_TOKEN and settings.BOT_TOKEN != "your_telegram_bot_token_here":
-        logger.info("Starting Telegram Bot resilient long-polling...")
-        try:
-            # Delete any existing webhook and drop stale updates on startup
-            await bot.delete_webhook(drop_pending_updates=True)
-            while True:
-                try:
-                    await dp.start_polling(bot, handle_signals=False)
-                    break
-                except Exception as poll_err:
-                    logger.warning(f"Polling connection interrupted ({poll_err}). Reconnecting in 3s...")
-                    await asyncio.sleep(3)
-        except (asyncio.CancelledError, KeyboardInterrupt):
-            logger.info("Polling received shutdown signal.")
-        finally:
-            scheduler.shutdown()
-            await bot.session.close()
-            if runner:
-                await runner.cleanup()
-            logger.info("Bot session and web server closed cleanly.")
-    else:
-        logger.info("No BOT_TOKEN set. Keeping web server alive for container health checks.")
+    try:
+        me = await bot.get_me()
+        logger.info(f"✅ Connected to Telegram successfully as @{me.username} (ID: {me.id})")
+    except Exception as e:
+        logger.error(f"❌ Failed to connect to Telegram API: {e}")
+
+    logger.info("Starting Telegram Bot resilient long-polling...")
+    try:
+        # Delete any existing webhook and drop stale updates on startup
+        await bot.delete_webhook(drop_pending_updates=True)
         while True:
-            await asyncio.sleep(3600)
+            try:
+                await dp.start_polling(bot, handle_signals=False)
+                break
+            except Exception as poll_err:
+                logger.warning(f"Polling connection interrupted ({poll_err}). Reconnecting in 3s...")
+                await asyncio.sleep(3)
+    except (asyncio.CancelledError, KeyboardInterrupt):
+        logger.info("Polling received shutdown signal.")
+    finally:
+        scheduler.shutdown()
+        await bot.session.close()
+        if runner:
+            await runner.cleanup()
+            logger.info("Bot session and web server closed cleanly.")
 
 
 if __name__ == "__main__":
