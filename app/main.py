@@ -1,6 +1,8 @@
 import asyncio
 import logging
 import sys
+import os
+from aiohttp import web
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
@@ -17,56 +19,65 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
     handlers=[logging.StreamHandler(sys.stdout)],
 )
-import os
+logger = logging.getLogger("jobhunter")
 
-async def handle_http(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-    """Respond to Render/cloud health check requests."""
+
+async def health_check_handler(request: web.Request) -> web.Response:
+    """HTTP Healthcheck endpoint for Render, Koyeb, Railway."""
+    return web.json_response({
+        "status": "healthy",
+        "service": "JobHunter AI Bot",
+        "bot": "online"
+    })
+
+
+async def start_web_server(port: int) -> web.AppRunner:
+    """Start standard aiohttp web server on 0.0.0.0 for Render port binding."""
+    app = web.Application()
+    app.router.add_get("/", health_check_handler)
+    app.router.add_get("/health", health_check_handler)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    logger.info(f"🚀 Render Web Service bound to 0.0.0.0:{port} successfully.")
+    return runner
+
+
+async def background_initial_scraping() -> None:
+    """Pre-populate initial job vacancies in background after web server is live."""
     try:
-        await reader.read(1024)
-        response = (
-            "HTTP/1.1 200 OK\r\n"
-            "Content-Type: text/plain\r\n"
-            "Content-Length: 26\r\n"
-            "\r\n"
-            "JobHunter AI Bot is Running"
-        )
-        writer.write(response.encode("utf-8"))
-        await writer.drain()
-        writer.close()
-        await writer.wait_closed()
-    except Exception:
-        pass
+        await JobCollector.collect_and_store_jobs()
+    except Exception as e:
+        logger.warning(f"Initial job collection encountered error: {e}")
 
 
 async def main() -> None:
     """Application entrypoint."""
     logger.info("Initializing JobHunter AI...")
 
-    # Start healthcheck HTTP web server for Free Cloud Web Services (Render, Koyeb, Railway)
-    port = int(os.environ.get("PORT", 8080))
+    # 1. Start HTTP web server immediately so Render detects open port instantly
+    port = int(os.environ.get("PORT", 10000))
+    runner = None
     try:
-        http_server = await asyncio.start_server(handle_http, "0.0.0.0", port)
-        logger.info(f"🌐 Healthcheck HTTP Web Server listening on port {port} (Ready for Free Render Web Service)")
+        runner = await start_web_server(port)
     except Exception as e:
-        logger.debug(f"HTTP health server skipped or port in use: {e}")
+        logger.error(f"Failed to start web server on port {port}: {e}")
 
-    # 1. Initialize SQLite / Postgres database tables
+    # 2. Initialize database
     await init_db()
 
-    # 2. Pre-populate initial jobs if database is fresh
-    try:
-        await JobCollector.collect_and_store_jobs()
-    except Exception as e:
-        logger.warning(f"Initial job collection skipped or encountered error: {e}")
+    # 3. Trigger initial job collection in background
+    asyncio.create_task(background_initial_scraping())
 
-    # 3. Check for bot token
+    # 4. Check for bot token
     if not settings.BOT_TOKEN or settings.BOT_TOKEN == "your_telegram_bot_token_here":
         logger.warning(
-            "⚠️ No valid BOT_TOKEN provided in .env! "
-            "Please create a bot via @BotFather and set BOT_TOKEN in .env to enable Telegram interaction."
+            "⚠️ No valid BOT_TOKEN provided! Set BOT_TOKEN in environment variables."
         )
 
-    # 4. Initialize Telegram Bot & Dispatcher
+    # 5. Initialize Telegram Bot & Dispatcher
     bot = Bot(
         token=settings.BOT_TOKEN or "123456789:MockTokenForValidationPurposesOnly000",
         default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN),
@@ -74,7 +85,7 @@ async def main() -> None:
     dp = Dispatcher()
     dp.include_router(bot_router)
 
-    # 5. Start background scheduler (Daily digests & periodic scraping)
+    # 6. Start background scheduler (Daily digests & periodic scraping)
     scheduler = setup_scheduler(bot)
     scheduler.start()
     logger.info(
@@ -82,28 +93,31 @@ async def main() -> None:
         f"Daily digest at {settings.DIGEST_TIME} UTC"
     )
 
-    # 6. Start polling if token is configured
+    # 7. Start Telegram Bot resilient polling
     if settings.BOT_TOKEN and settings.BOT_TOKEN != "your_telegram_bot_token_here":
         logger.info("Starting Telegram Bot resilient long-polling...")
         try:
-            # Delete any webhook and drop outdated pending updates on startup
+            # Delete any existing webhook and drop stale updates on startup
             await bot.delete_webhook(drop_pending_updates=True)
             while True:
                 try:
                     await dp.start_polling(bot, handle_signals=False)
                     break
                 except Exception as poll_err:
-                    logger.warning(f"Polling connection interrupted ({poll_err}). Reconnecting in 3 seconds...")
+                    logger.warning(f"Polling connection interrupted ({poll_err}). Reconnecting in 3s...")
                     await asyncio.sleep(3)
         except (asyncio.CancelledError, KeyboardInterrupt):
             logger.info("Polling received shutdown signal.")
         finally:
             scheduler.shutdown()
             await bot.session.close()
-            logger.info("Bot session and scheduler closed cleanly.")
+            if runner:
+                await runner.cleanup()
+            logger.info("Bot session and web server closed cleanly.")
     else:
-        logger.info("Database and Scheduler verified. Exiting startup sequence (running in worker test mode).")
-        scheduler.shutdown()
+        logger.info("No BOT_TOKEN set. Keeping web server alive for container health checks.")
+        while True:
+            await asyncio.sleep(3600)
 
 
 if __name__ == "__main__":
