@@ -17,12 +17,38 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
     handlers=[logging.StreamHandler(sys.stdout)],
 )
-logger = logging.getLogger("jobhunter")
+import os
+
+async def handle_http(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+    """Respond to Render/cloud health check requests."""
+    try:
+        await reader.read(1024)
+        response = (
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: text/plain\r\n"
+            "Content-Length: 26\r\n"
+            "\r\n"
+            "JobHunter AI Bot is Running"
+        )
+        writer.write(response.encode("utf-8"))
+        await writer.drain()
+        writer.close()
+        await writer.wait_closed()
+    except Exception:
+        pass
 
 
 async def main() -> None:
     """Application entrypoint."""
     logger.info("Initializing JobHunter AI...")
+
+    # Start healthcheck HTTP web server for Free Cloud Web Services (Render, Koyeb, Railway)
+    port = int(os.environ.get("PORT", 8080))
+    try:
+        http_server = await asyncio.start_server(handle_http, "0.0.0.0", port)
+        logger.info(f"🌐 Healthcheck HTTP Web Server listening on port {port} (Ready for Free Render Web Service)")
+    except Exception as e:
+        logger.debug(f"HTTP health server skipped or port in use: {e}")
 
     # 1. Initialize SQLite / Postgres database tables
     await init_db()
