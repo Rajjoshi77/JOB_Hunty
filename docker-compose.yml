@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  jobhunter-bot:
+    build: .
+    container_name: jobhunter_ai
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - jobhunter_data:/app/data
+    environment:
+      - DATABASE_URL=sqlite+aiosqlite:////app/data/jobhunter.db
+      - TZ=Asia/Kolkata
+
+volumes:
+  jobhunter_data:
+    driver: local

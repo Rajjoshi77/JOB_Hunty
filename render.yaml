@@ -1,0 +1,19 @@
+services:
+  - type: worker
+    name: jobhunter-ai-bot
+    env: python
+    region: singapore
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m app.main
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: DATABASE_URL
+        value: sqlite+aiosqlite:///jobhunter.db
+      - key: LOG_LEVEL
+        value: INFO
+      - key: TIMEZONE
+        value: Asia/Kolkata
+      - key: DAILY_DIGEST_TIME
+        value: "09:00"
